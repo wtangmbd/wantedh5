@@ -2,53 +2,96 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>WANTED · 手绘生成器</title>
     <style>
-        body { background: #1a1a1a; display: flex; flex-direction: column; align-items: center; color: #fff; font-family: sans-serif; margin: 0; padding: 10px; }
-        .canvas-container { position: relative; width: 100%; max-width: 500px; }
-        #bgCanvas, #drawCanvas { width: 100%; display: block; }
-        #drawCanvas { position: absolute; top: 0; left: 0; touch-action: none; cursor: crosshair; }
-        .toolbar { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; justify-content: center; align-items: center; background: #2a2a2a; width: 100%; max-width: 500px; box-sizing: border-box; border-radius: 0 0 8px 8px; }
+        body { background: #1a1a1a; display: flex; flex-direction: column; align-items: center; color: #fff; font-family: sans-serif; margin: 0; padding: 10px; overflow: hidden; height: 100vh; box-sizing: border-box; }
+        
+        /* 视口容器：隐藏溢出部分，控制画布展示区域 */
+        .viewport { 
+            position: relative; width: 100%; max-width: 500px; flex-grow: 1; 
+            background: #000; overflow: hidden; border-radius: 8px 8px 0 0; 
+            touch-action: none; /* 禁用默认手势，完全由JS接管缩放和平移 */
+        }
+
+        /* 画布缩放平移层 */
+        .canvas-container { 
+            position: absolute; top: 0; left: 0; 
+            transform-origin: 0 0; 
+            will-change: transform;
+        }
+
+        #bgCanvas, #drawCanvas { display: block; }
+        #drawCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+
+        .toolbar { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; justify-content: center; align-items: center; background: #2a2a2a; width: 100%; max-width: 500px; box-sizing: border-box; border-radius: 0 0 8px 8px; flex-shrink: 0; }
         button { padding: 8px 14px; cursor: pointer; border-radius: 6px; border: none; background: #444; color: #fff; font-weight: bold; font-size: 14px; }
         button.active { background: #8b3a30; }
         .slider-group { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #ccc; width: 100%; justify-content: center; margin-top: 5px; }
         input[type="range"] { cursor: pointer; width: 60%; }
+
+        /* 手机端长按保存提示弹窗样式 */
+        #preview-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 999; padding: 20px; box-sizing: border-box;
+        }
+        #preview-modal img {
+            max-width: 100%; max-height: 75vh; border-radius: 8px; box-shadow: 0 5px 25px rgba(0,0,0,0.8);
+        }
+        .modal-tip { margin-top: 15px; color: #ffcc00; font-size: 15px; font-weight: bold; text-align: center; }
+        .modal-close { margin-top: 15px; padding: 10px 25px; background: #8b3a30; color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
 
-<div class="canvas-container">
-    <canvas id="bgCanvas"></canvas>
-    <canvas id="drawCanvas"></canvas>
-</div>
-
-<div class="toolbar">
-    <button id="btn-pen" class="active" onclick="setMode('pen')">🖊️ 钢笔</button>
-    <button id="btn-marker" onclick="setMode('marker')">🖍️ 涂色</button>
-    <button onclick="clearAll()" style="background:#555;">清空</button>
-    <button onclick="download()" style="background:#8b3a30;">保存图片</button>
-    
-    <div class="slider-group">
-        <label for="opacityRange">涂色透明度:</label>
-        <input type="range" id="opacityRange" min="0.1" max="1.0" step="0.05" value="0.35">
+    <!-- 视口容器 -->
+    <div class="viewport" id="viewport">
+        <div class="canvas-container" id="canvasContainer">
+            <canvas id="bgCanvas"></canvas>
+            <canvas id="drawCanvas"></canvas>
+        </div>
     </div>
-</div>
+
+    <div class="toolbar">
+        <button id="btn-pen" class="active" onclick="setMode('pen')">🖊️ 钢笔</button>
+        <button id="btn-marker" onclick="setMode('marker')">🖍️ 涂色</button>
+        <button onclick="undo()" style="background:#555;">撤回</button>
+        <button onclick="clearAll()" style="background:#444;">清空</button>
+        <button onclick="showPreview()" style="background:#8b3a30;">生成相册图片</button>
+        
+        <div class="slider-group">
+            <label for="opacityRange">涂色透明度:</label>
+            <input type="range" id="opacityRange" min="0.1" max="1.0" step="0.05" value="0.35">
+        </div>
+    </div>
+
+    <!-- 弹窗：用于长按保存 -->
+    <div id="preview-modal" onclick="closePreview()">
+        <img id="preview-img" src="" alt="通缉令预览">
+        <div class="modal-tip">👉 请【长按上方图片】选择“保存到相册”</div>
+        <button class="modal-close" onclick="closePreview()">关闭预览</button>
+    </div>
 
 <script>
+    const viewport = document.getElementById('viewport');
+    const container = document.getElementById('canvasContainer');
     const bgCanvas = document.getElementById('bgCanvas');
     const drawCanvas = document.getElementById('drawCanvas');
     const ctx = drawCanvas.getContext('2d');
+    
     let mode = 'pen';
-    let drawing = false;
+    let historySteps = [];
 
-    // 配置参数（你可以在这里调整笔触粗细）
     const CONFIG = {
-        penWidth: 5,       // 钢笔粗细
-        markerWidth: 20    // 涂色笔粗细（原先是40，现在改细了一半，方便精细填色）
+        penWidth: 5,       
+        markerWidth: 28    
     };
 
-    // 初始化图片
+    // 变换状态：缩放比例与平移量
+    let scale = 1, panX = 0, panY = 0;
+
+    // 初始化图片加载
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = '7853b6a44ae0169c8597e955aed39a1.jpg';
@@ -56,7 +99,19 @@
         bgCanvas.width = drawCanvas.width = img.naturalWidth;
         bgCanvas.height = drawCanvas.height = img.naturalHeight;
         bgCanvas.getContext('2d').drawImage(img, 0, 0);
+        
+        // 自动计算初始适配视口的缩放比例
+        const vWidth = viewport.clientWidth;
+        const vHeight = viewport.clientHeight;
+        scale = vWidth / img.naturalWidth;
+        panY = (vHeight - img.naturalHeight * scale) / 2; // 垂直居中
+        updateTransform();
+        saveState(); 
     };
+
+    function updateTransform() {
+        container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
 
     function setMode(m) { 
         mode = m; 
@@ -66,72 +121,155 @@
         document.getElementById('btn-' + m).classList.add('active');
     }
 
-    // 获取坐标（兼容鼠标和手机触屏）
-    function getPos(e) {
-        const rect = drawCanvas.getBoundingClientRect();
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
+    function saveState() {
+        historySteps.push(ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height));
+        if (historySteps.length > 20) historySteps.shift();
+    }
+
+    function undo() {
+        if (historySteps.length > 1) {
+            historySteps.pop();
+            ctx.putImageData(historySteps[historySteps.length - 1], 0, 0);
         }
-        return { 
-            x: (clientX - rect.left) * (drawCanvas.width / rect.width), 
-            y: (clientY - rect.top) * (drawCanvas.height / rect.height) 
+    }
+
+    // 将屏幕坐标转换为画布内部真实像素坐标
+    function getCanvasPos(clientX, clientY) {
+        const rect = container.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) / scale,
+            y: (clientY - rect.top) / scale
         };
     }
 
-    // 绘制动作开始
-    function startDraw(e) {
+    // 多指触控与绘图状态管理
+    let isDrawing = false;
+    let lastDrawPos = null;
+    
+    // 双指缩放平移用变量
+    let lastTouchDist = 0;
+    let lastCenter = { x: 0, y: 0 };
+    let isPinching = false;
+
+    viewport.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        drawing = true;
-        const pos = getPos(e);
-        ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
+        if (e.touches.length === 2) {
+            // 双指准备缩放/平移
+            isDrawing = false;
+            isPinching = true;
+            lastTouchDist = getTouchDist(e.touches[0], e.touches[1]);
+            lastCenter = getTouchCenter(e.touches[0], e.touches[1]);
+        } else if (e.touches.length === 1 && !isPinching) {
+            // 单指画画
+            saveState();
+            isDrawing = true;
+            const pos = getCanvasPos(e.touches[0].clientX, e.touches[0].clientY);
+            lastDrawPos = pos;
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+        }
+    }, { passive: false });
+
+    viewport.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (e.touches.length === 2 && isPinching) {
+            // 处理双指缩放和移动
+            const dist = getTouchDist(e.touches[0], e.touches[1]);
+            const center = getTouchCenter(e.touches[0], e.touches[1]);
+            
+            const zoomFactor = dist / lastTouchDist;
+            let newScale = scale * zoomFactor;
+            
+            // 限制缩放范围（0.5倍 到 5倍）
+            if (newScale >= 0.5 && newScale <= 5.0) {
+                // 以双指中心点进行缩放
+                panX = center.x - (center.x - panX) * (newScale / scale);
+                panY = center.y - (center.y - panY) * (newScale / scale);
+                scale = newScale;
+            }
+
+            // 平移
+            panX += (center.x - lastCenter.x);
+            panY += (center.y - lastCenter.y);
+
+            lastTouchDist = dist;
+            lastCenter = center;
+            updateTransform();
+
+        } else if (e.touches.length === 1 && isDrawing && !isPinching) {
+            // 单指正常绘图
+            const pos = getCanvasPos(e.touches[0].clientX, e.touches[0].clientY);
+            ctx.lineTo(pos.x, pos.y);
+            
+            const alpha = document.getElementById('opacityRange').value;
+            if (mode === 'pen') {
+                ctx.lineWidth = CONFIG.penWidth;
+                ctx.strokeStyle = `rgba(74, 31, 22, 0.9)`; 
+            } else {
+                ctx.lineWidth = CONFIG.markerWidth; 
+                ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`; 
+            }
+
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+            lastDrawPos = pos;
+        }
+    }, { passive: false });
+
+    viewport.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+            isPinching = false;
+        }
+        if (e.touches.length === 0) {
+            isDrawing = false;
+        }
+    });
+
+    // 辅助计算双指距离与中心点
+    function getTouchDist(t1, t2) {
+        return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    }
+    function getTouchCenter(t1, t2) {
+        return {
+            x: (t1.clientX + t2.clientX) / 2,
+            y: (t1.clientY + t2.clientY) / 2
+        };
     }
 
-    // 绘制中
-    function moveDraw(e) {
-        if (!drawing) return;
-        e.preventDefault();
-        const pos = getPos(e);
+    // 兼容桌面端鼠标绘制（如有需要）
+    let mouseDrawing = false;
+    drawCanvas.addEventListener('mousedown', (e) => {
+        saveState();
+        mouseDrawing = true;
+        const pos = getCanvasPos(e.clientX, e.clientY);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+    });
+    drawCanvas.addEventListener('mousemove', (e) => {
+        if (!mouseDrawing) return;
+        const pos = getCanvasPos(e.clientX, e.clientY);
         ctx.lineTo(pos.x, pos.y);
-        
         const alpha = document.getElementById('opacityRange').value;
-
         if (mode === 'pen') {
             ctx.lineWidth = CONFIG.penWidth;
-            ctx.strokeStyle = `rgba(74, 31, 22, 0.9)`; // 钢笔保持深色
+            ctx.strokeStyle = `rgba(74, 31, 22, 0.9)`;
         } else {
-            ctx.lineWidth = CONFIG.markerWidth; // 使用调整后的涂色笔粗细
-            ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`; // 受滑块控制的透明度
+            ctx.lineWidth = CONFIG.markerWidth;
+            ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`;
         }
-
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.stroke();
-    }
-
-    // 绘制结束
-    function endDraw(e) {
-        drawing = false;
-    }
-
-    // 绑定鼠标事件
-    drawCanvas.addEventListener('mousedown', startDraw);
-    drawCanvas.addEventListener('mousemove', moveDraw);
-    window.addEventListener('mouseup', endDraw);
-
-    // 绑定触屏事件
-    drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
-    drawCanvas.addEventListener('touchmove', moveDraw, { passive: false });
-    window.addEventListener('touchend', endDraw);
+    });
+    window.addEventListener('mouseup', () => { mouseDrawing = false; });
 
     function clearAll() { 
         ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height); 
+        saveState(); 
     }
 
-    function download() {
+    function showPreview() {
         const temp = document.createElement('canvas');
         temp.width = drawCanvas.width; 
         temp.height = drawCanvas.height;
@@ -140,10 +278,13 @@
         tCtx.drawImage(bgCanvas, 0, 0);
         tCtx.drawImage(drawCanvas, 0, 0);
         
-        const a = document.createElement('a');
-        a.href = temp.toDataURL('image/jpeg', 0.9);
-        a.download = 'WANTED_Custom.jpg';
-        a.click();
+        const dataURL = temp.toDataURL('image/png');
+        document.getElementById('preview-img').src = dataURL;
+        document.getElementById('preview-modal').style.display = 'flex';
+    }
+
+    function closePreview() {
+        document.getElementById('preview-modal').style.display = 'none';
     }
 </script>
 </body>
