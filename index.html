@@ -42,6 +42,12 @@
     let mode = 'pen';
     let drawing = false;
 
+    // 配置参数（你可以在这里调整笔触粗细）
+    const CONFIG = {
+        penWidth: 5,       // 钢笔粗细
+        markerWidth: 20    // 涂色笔粗细（原先是40，现在改细了一半，方便精细填色）
+    };
+
     // 初始化图片
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -94,10 +100,10 @@
         const alpha = document.getElementById('opacityRange').value;
 
         if (mode === 'pen') {
-            ctx.lineWidth = 5;
+            ctx.lineWidth = CONFIG.penWidth;
             ctx.strokeStyle = `rgba(74, 31, 22, 0.9)`; // 钢笔保持深色
         } else {
-            ctx.lineWidth = 40; // 涂色笔刷
+            ctx.lineWidth = CONFIG.markerWidth; // 使用调整后的涂色笔粗细
             ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`; // 受滑块控制的透明度
         }
 
@@ -116,7 +122,7 @@
     drawCanvas.addEventListener('mousemove', moveDraw);
     window.addEventListener('mouseup', endDraw);
 
-    // 绑定触屏事件（手机端完美支持）
+    // 绑定触屏事件
     drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
     drawCanvas.addEventListener('touchmove', moveDraw, { passive: false });
     window.addEventListener('touchend', endDraw);
@@ -131,7 +137,6 @@
         temp.height = drawCanvas.height;
         const tCtx = temp.getContext('2d');
         
-        // 合并底图和手绘层
         tCtx.drawImage(bgCanvas, 0, 0);
         tCtx.drawImage(drawCanvas, 0, 0);
         
