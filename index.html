@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WANTED · 手绘生成器</title>
     <style>
-        body { background: #1a1a1a; display: flex; flex-direction: column; align-items: center; color: #fff; font-family: sans-serif; }
+        body { background: #1a1a1a; display: flex; flex-direction: column; align-items: center; color: #fff; font-family: sans-serif; margin: 0; padding: 10px; }
         .canvas-container { position: relative; width: 100%; max-width: 500px; }
         #bgCanvas, #drawCanvas { width: 100%; display: block; }
         #drawCanvas { position: absolute; top: 0; left: 0; touch-action: none; cursor: crosshair; }
-        .toolbar { display: flex; gap: 12px; padding: 15px; flex-wrap: wrap; justify-content: center; align-items: center; background: #2a2a2a; width: 100%; max-width: 500px; box-sizing: border-box; }
-        button { padding: 10px 16px; cursor: pointer; border-radius: 6px; border: none; background: #444; color: #fff; font-weight: bold; }
+        .toolbar { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; justify-content: center; align-items: center; background: #2a2a2a; width: 100%; max-width: 500px; box-sizing: border-box; border-radius: 0 0 8px 8px; }
+        button { padding: 8px 14px; cursor: pointer; border-radius: 6px; border: none; background: #444; color: #fff; font-weight: bold; font-size: 14px; }
         button.active { background: #8b3a30; }
-        .slider-group { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-        input[type="range"] { cursor: pointer; }
+        .slider-group { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #ccc; width: 100%; justify-content: center; margin-top: 5px; }
+        input[type="range"] { cursor: pointer; width: 60%; }
     </style>
 </head>
 <body>
@@ -26,14 +26,13 @@
 <div class="toolbar">
     <button id="btn-pen" class="active" onclick="setMode('pen')">🖊️ 钢笔</button>
     <button id="btn-marker" onclick="setMode('marker')">🖍️ 涂色</button>
+    <button onclick="clearAll()" style="background:#555;">清空</button>
+    <button onclick="download()" style="background:#8b3a30;">保存图片</button>
     
     <div class="slider-group">
-        <label for="opacityRange">透明度:</label>
+        <label for="opacityRange">涂色透明度:</label>
         <input type="range" id="opacityRange" min="0.1" max="1.0" step="0.05" value="0.35">
     </div>
-
-    <button onclick="clearAll()" style="background:#8b3a30;">清空</button>
-    <button onclick="download()" style="background:#555;">保存</button>
 </div>
 
 <script>
@@ -55,51 +54,87 @@
 
     function setMode(m) { 
         mode = m; 
-        document.querySelectorAll('button').forEach(b => {
+        document.querySelectorAll('.toolbar button').forEach(b => {
             if(b.id === 'btn-pen' || b.id === 'btn-marker') b.classList.remove('active');
         });
         document.getElementById('btn-' + m).classList.add('active');
     }
 
-    // 绘制逻辑
-    drawCanvas.onmousedown = (e) => { drawing = true; ctx.beginPath(); ctx.moveTo(getPos(e).x, getPos(e).y); };
-    drawCanvas.onmousemove = (e) => {
+    // 获取坐标（兼容鼠标和手机触屏）
+    function getPos(e) {
+        const rect = drawCanvas.getBoundingClientRect();
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        return { 
+            x: (clientX - rect.left) * (drawCanvas.width / rect.width), 
+            y: (clientY - rect.top) * (drawCanvas.height / rect.height) 
+        };
+    }
+
+    // 绘制动作开始
+    function startDraw(e) {
+        e.preventDefault();
+        drawing = true;
+        const pos = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+    }
+
+    // 绘制中
+    function moveDraw(e) {
         if (!drawing) return;
+        e.preventDefault();
         const pos = getPos(e);
         ctx.lineTo(pos.x, pos.y);
         
-        // 获取当前滑块的透明度值
         const alpha = document.getElementById('opacityRange').value;
 
         if (mode === 'pen') {
             ctx.lineWidth = 5;
-            // 钢笔也带上透明度，或者保持深色。这里让钢笔跟随透明度或保持浓郁复古色
-            ctx.strokeStyle = `rgba(74, 31, 22, ${Math.max(alpha, 0.8)})`; 
+            ctx.strokeStyle = `rgba(74, 31, 22, 0.9)`; // 钢笔保持深色
         } else {
-            ctx.lineWidth = 40; // 涂色笔刷较粗
-            ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`; // 涂色使用滑块控制的透明度
+            ctx.lineWidth = 40; // 涂色笔刷
+            ctx.strokeStyle = `rgba(119, 44, 34, ${alpha})`; // 受滑块控制的透明度
         }
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.stroke();
-    };
-    drawCanvas.onmouseup = () => { drawing = false; };
-
-    function getPos(e) {
-        const rect = drawCanvas.getBoundingClientRect();
-        return { x: (e.clientX - rect.left) * (drawCanvas.width/rect.width), 
-                 y: (e.clientY - rect.top) * (drawCanvas.height/rect.height) };
     }
 
-    function clearAll() { ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height); }
+    // 绘制结束
+    function endDraw(e) {
+        drawing = false;
+    }
+
+    // 绑定鼠标事件
+    drawCanvas.addEventListener('mousedown', startDraw);
+    drawCanvas.addEventListener('mousemove', moveDraw);
+    window.addEventListener('mouseup', endDraw);
+
+    // 绑定触屏事件（手机端完美支持）
+    drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
+    drawCanvas.addEventListener('touchmove', moveDraw, { passive: false });
+    window.addEventListener('touchend', endDraw);
+
+    function clearAll() { 
+        ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height); 
+    }
 
     function download() {
         const temp = document.createElement('canvas');
-        temp.width = drawCanvas.width; temp.height = drawCanvas.height;
+        temp.width = drawCanvas.width; 
+        temp.height = drawCanvas.height;
         const tCtx = temp.getContext('2d');
+        
+        // 合并底图和手绘层
         tCtx.drawImage(bgCanvas, 0, 0);
         tCtx.drawImage(drawCanvas, 0, 0);
+        
         const a = document.createElement('a');
         a.href = temp.toDataURL('image/jpeg', 0.9);
         a.download = 'WANTED_Custom.jpg';
