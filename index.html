@@ -3,344 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>WANTED · 纯手绘通缉令生成器</title>
+    <title>WANTED · 自动填充通缉令</title>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            -webkit-tap-highlight-color: transparent;
-        }
-        body {
-            background-color: #1a1a1a;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            color: #d4d4d4;
-        }
-
-        /* 画布容器：使用双层 Canvas */
-        .canvas-container {
-            position: relative;
-            width: 100%;
-            max-width: 500px;
-            background: #000;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        
-        /* 底层：背景与蛛网图 */
-        #bgCanvas {
-            display: block;
-            width: 100%;
-            height: auto;
-        }
-        
-        /* 顶层：手写涂鸦层 */
-        #drawCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            touch-action: none; /* 阻止屏幕滑动 */
-            cursor: crosshair;
-        }
-
-        /* 底部控制面板 */
-        .control-panel {
-            width: 100%;
-            max-width: 500px;
-            padding: 20px;
-            background: #2a2a2a;
-            border-top: 2px solid #333;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            flex-grow: 1;
-        }
-        
-        .mode-selector {
-            display: flex;
-            justify-content: space-between;
-            background: #1e1e1e;
-            border-radius: 8px;
-            padding: 5px;
-        }
-        .mode-selector label {
-            flex: 1;
-            text-align: center;
-            padding: 10px 0;
-            color: #999;
-            font-size: 15px;
-            cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.2s;
-        }
-        .mode-selector input[type="radio"] {
-            display: none;
-        }
-        .mode-selector input[type="radio"]:checked + span {
-            color: #fff;
-            font-weight: bold;
-        }
-        .mode-selector label:has(input[type="radio"]:checked) {
-            background: #8b3a30;
-        }
-
-        .btn-group {
-            display: flex;
-            gap: 10px;
-        }
-        button {
-            flex: 1;
-            padding: 14px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: bold;
-            cursor: pointer;
-            border: none;
-            transition: opacity 0.2s;
-        }
-        button:active {
-            opacity: 0.8;
-        }
-        .btn-clear {
-            background: #444;
-            color: #fff;
-        }
-        .btn-generate {
-            background: #8b3a30;
-            color: #fff;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body { background-color: #1a1a1a; display: flex; flex-direction: column; align-items: center; min-height: 100vh; color: #fff; }
+        .canvas-container { position: relative; width: 100%; max-width: 500px; background: #000; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #bgCanvas, #drawCanvas { display: block; width: 100%; height: auto; }
+        #drawCanvas { position: absolute; top: 0; left: 0; touch-action: none; cursor: crosshair; }
+        .panel { width: 100%; max-width: 500px; padding: 15px; background: #2a2a2a; display: flex; flex-direction: column; gap: 10px; }
+        .tools { display: flex; gap: 5px; background: #111; padding: 5px; border-radius: 8px; }
+        .tool-btn { flex: 1; padding: 10px; text-align: center; background: #333; color: #aaa; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .tool-btn.active { background: #8b3a30; color: #fff; font-weight: bold; }
+        .hint { font-size: 12px; color: #888; text-align: center; }
     </style>
 </head>
 <body>
 
-    <div class="canvas-container">
-        <!-- 背景与雷达图层 -->
-        <canvas id="bgCanvas"></canvas>
-        <!-- 手绘涂鸦层 (置于顶层接收事件) -->
-        <canvas id="drawCanvas"></canvas>
+<div class="canvas-container">
+    <canvas id="bgCanvas"></canvas>
+    <canvas id="drawCanvas"></canvas>
+</div>
+
+<div class="panel">
+    <div class="tools" id="toolBox">
+        <div class="tool-btn active" data-tool="pen">🖊️ 钢笔</div>
+        <div class="tool-btn" data-tool="marker">🖍️ 涂色</div>
+        <div class="tool-btn" data-tool="fill" title="闭合区域内双击自动填充">💧 填充</div>
+        <div class="tool-btn" data-tool="eraser">🧽 擦除</div>
     </div>
+    <div class="hint">"涂色"模式画轮廓，"填充"模式下双击区域内自动填色</div>
+    <button style="padding:12px; background:#8b3a30; border:none; color:#fff; border-radius:6px;" onclick="download()">保存通缉令</button>
+</div>
 
-    <div class="control-panel">
-        <div class="mode-selector">
-            <label>
-                <input type="radio" name="mode" value="radar" checked>
-                <span>🕸️ 调整蛛网</span>
-            </label>
-            <label>
-                <input type="radio" name="mode" value="draw">
-                <span>✍️ 手写文字</span>
-            </label>
-        </div>
+<script>
+    const bgCanvas = document.getElementById('bgCanvas'), drawCanvas = document.getElementById('drawCanvas');
+    const bgCtx = bgCanvas.getContext('2d'), drawCtx = drawCanvas.getContext('2d');
+    let currentTool = 'pen';
 
-        <div class="btn-group">
-            <button class="btn-clear" onclick="clearDrawing()">清空手写</button>
-            <button class="btn-generate" onclick="downloadPoster()">保存图片</button>
-        </div>
-    </div>
+    const bgImage = new Image();
+    bgImage.src = '7853b6a44ae0169c8597e955aed39a1.jpg';
+    bgImage.onload = () => {
+        bgCanvas.width = drawCanvas.width = bgImage.naturalWidth;
+        bgCanvas.height = drawCanvas.height = bgImage.naturalHeight;
+        bgCtx.drawImage(bgImage, 0, 0);
+    };
 
-    <script>
-        const bgCanvas = document.getElementById('bgCanvas');
-        const drawCanvas = document.getElementById('drawCanvas');
-        const bgCtx = bgCanvas.getContext('2d');
-        const drawCtx = drawCanvas.getContext('2d');
+    // 工具切换
+    document.getElementById('toolBox').addEventListener('click', e => {
+        if(!e.target.dataset.tool) return;
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentTool = e.target.dataset.tool;
+    });
 
-        // ==== 配置参数 ====
-        const CONFIG = {
-            bgSrc: '7853b6a44ae0169c8597e955aed39a1.jpg',
-            // 修正后的雷达中心点和半径 (根据底图比例计算)
-            radarCenterX: 0.505, 
-            radarCenterY: 0.528, 
-            radarMaxRadius: 0.25, // 缩小了最大半径，防止溢出最外层网格
-            
-            radarFillColor: 'rgba(119, 44, 34, 0.7)',
-            radarStrokeColor: 'rgba(70, 20, 15, 0.8)',
-            
-            // 手绘笔刷配置
-            penColor: '#4a1f16',
-            penWidthRatio: 0.008 // 笔刷粗细随图片分辨率缩放
-        };
+    // 洪水填充算法 (Flood Fill)
+    function floodFill(x, y, fillColor) {
+        const imgData = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+        const data = imgData.data;
+        const targetColor = getPixel(imgData, x, y);
+        
+        // 简单防溢出检查
+        if (targetColor[0] === 119 && targetColor[1] === 44 && targetColor[2] === 34) return;
 
-        // 7个维度的值 (0-5档)
-        let values = [3, 2, 4, 2, 3, 3, 2]; 
-        let currentMode = 'radar'; // 'radar' 或 'draw'
-
-        const bgImage = new Image();
-        bgImage.src = CONFIG.bgSrc;
-        bgImage.onload = () => {
-            // 初始化两个画布的实际分辨率
-            bgCanvas.width = bgImage.naturalWidth;
-            bgCanvas.height = bgImage.naturalHeight;
-            drawCanvas.width = bgImage.naturalWidth;
-            drawCanvas.height = bgImage.naturalHeight;
-            
-            // 设置手绘笔刷样式
-            drawCtx.lineCap = 'round';
-            drawCtx.lineJoin = 'round';
-            drawCtx.strokeStyle = CONFIG.penColor;
-            drawCtx.lineWidth = drawCanvas.width * CONFIG.penWidthRatio;
-
-            drawRadarLayer();
-        };
-
-        // ==== 模式切换监听 ====
-        document.querySelectorAll('input[name="mode"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                currentMode = e.target.value;
-            });
-        });
-
-        // ==== 绘制底层：背景 + 蛛网 ====
-        function drawRadarLayer() {
-            if (!bgImage.complete) return;
-
-            bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
-            bgCtx.drawImage(bgImage, 0, 0, bgCanvas.width, bgCanvas.height);
-
-            const cx = bgCanvas.width * CONFIG.radarCenterX;
-            const cy = bgCanvas.height * CONFIG.radarCenterY;
-            const maxR = bgCanvas.width * CONFIG.radarMaxRadius;
-
-            bgCtx.beginPath();
-            for (let i = 0; i < 7; i++) {
-                const angle = -Math.PI / 2 + (i * 2 * Math.PI / 7);
-                const r = maxR * (values[i] / 5);
-                const x = cx + r * Math.cos(angle);
-                const y = cy + r * Math.sin(angle);
-                
-                if (i === 0) bgCtx.moveTo(x, y);
-                else bgCtx.lineTo(x, y);
-            }
-            bgCtx.closePath();
-            
-            bgCtx.fillStyle = CONFIG.radarFillColor;
-            bgCtx.fill();
-            bgCtx.lineWidth = bgCanvas.width * 0.005;
-            bgCtx.strokeStyle = CONFIG.radarStrokeColor;
-            bgCtx.stroke();
-        }
-
-        // ==== 交互逻辑获取真实坐标 ====
-        function getPos(e) {
-            const rect = drawCanvas.getBoundingClientRect();
-            const scaleX = drawCanvas.width / rect.width;
-            const scaleY = drawCanvas.height / rect.height;
-            
-            let clientX = e.clientX;
-            let clientY = e.clientY;
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            }
-            return {
-                x: (clientX - rect.left) * scaleX,
-                y: (clientY - rect.top) * scaleY
-            };
-        }
-
-        // ==== 统一的事件处理机制 ====
-        let isInteracting = false;
-        let lastDrawPos = null;
-
-        function handleStart(e) {
-            e.preventDefault();
-            isInteracting = true;
-            const pos = getPos(e);
-            
-            if (currentMode === 'radar') {
-                updateRadar(pos.x, pos.y);
-            } else if (currentMode === 'draw') {
-                lastDrawPos = pos;
-                drawCtx.beginPath();
-                drawCtx.moveTo(pos.x, pos.y);
-                drawCtx.lineTo(pos.x, pos.y); // 画一个点
-                drawCtx.stroke();
+        const stack = [[x, y]];
+        while(stack.length) {
+            let [px, py] = stack.pop();
+            let pos = (py * drawCanvas.width + px) * 4;
+            if(data[pos+3] === 0) { // 仅填充透明区域
+                data[pos] = 119; data[pos+1] = 44; data[pos+2] = 34; data[pos+3] = 180;
+                stack.push([px+1, py], [px-1, py], [px, py+1], [px, py-1]);
             }
         }
+        drawCtx.putImageData(imgData, 0, 0);
+    }
 
-        function handleMove(e) {
-            if (!isInteracting) return;
-            e.preventDefault();
-            const pos = getPos(e);
+    function getPixel(imgData, x, y) {
+        let i = (y * imgData.width + x) * 4;
+        return [imgData.data[i], imgData.data[i+1], imgData.data[i+2], imgData.data[i+3]];
+    }
 
-            if (currentMode === 'radar') {
-                updateRadar(pos.x, pos.y);
-            } else if (currentMode === 'draw') {
-                if (lastDrawPos) {
-                    drawCtx.beginPath();
-                    drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
-                    drawCtx.lineTo(pos.x, pos.y);
-                    drawCtx.stroke();
-                    lastDrawPos = pos;
-                }
-            }
+    // 绘图逻辑
+    let drawing = false, lastPos = null;
+    drawCanvas.addEventListener('mousedown', e => {
+        const pos = getPos(e);
+        if(currentTool === 'fill') {
+            floodFill(pos.x, pos.y);
+        } else {
+            drawing = true; lastPos = pos;
         }
+    });
+    drawCanvas.addEventListener('mousemove', e => {
+        if(!drawing) return;
+        const pos = getPos(e);
+        drawCtx.beginPath();
+        drawCtx.lineWidth = currentTool === 'pen' ? 5 : 20;
+        drawCtx.strokeStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : 'rgba(119,44,34,0.8)';
+        drawCtx.globalCompositeOperation = currentTool === 'eraser' ? 'destination-out' : 'source-over';
+        drawCtx.moveTo(lastPos.x, lastPos.y);
+        drawCtx.lineTo(pos.x, pos.y);
+        drawCtx.stroke();
+        lastPos = pos;
+    });
+    window.addEventListener('mouseup', () => drawing = false);
 
-        function handleEnd(e) {
-            isInteracting = false;
-            lastDrawPos = null;
-        }
+    function getPos(e) {
+        const rect = drawCanvas.getBoundingClientRect();
+        return { x: Math.floor((e.clientX - rect.left) * (drawCanvas.width/rect.width)), 
+                 y: Math.floor((e.clientY - rect.top) * (drawCanvas.height/rect.height)) };
+    }
 
-        // 计算蛛网维度逻辑
-        function updateRadar(x, y) {
-            const cx = bgCanvas.width * CONFIG.radarCenterX;
-            const cy = bgCanvas.height * CONFIG.radarCenterY;
-            const maxR = bgCanvas.width * CONFIG.radarMaxRadius;
-
-            const dx = x - cx;
-            const dy = y - cy;
-            let angle = Math.atan2(dy, dx) + Math.PI / 2;
-            if (angle < 0) angle += Math.PI * 2;
-
-            const segment = (Math.PI * 2) / 7;
-            const axisIndex = Math.round(angle / segment) % 7;
-
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            // 将档位严格限制在 0 - 5 之间，避免溢出
-            let val = Math.round((distance / maxR) * 5);
-            val = Math.max(0, Math.min(5, val)); 
-
-            values[axisIndex] = val;
-            drawRadarLayer(); // 重绘底层
-        }
-
-        // 绑定事件到顶层的 drawCanvas
-        drawCanvas.addEventListener('mousedown', handleStart);
-        drawCanvas.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleEnd);
-
-        drawCanvas.addEventListener('touchstart', handleStart, {passive: false});
-        drawCanvas.addEventListener('touchmove', handleMove, {passive: false});
-        window.addEventListener('touchend', handleEnd);
-
-        // ==== 清空手写 ====
-        function clearDrawing() {
-            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-        }
-
-        // ==== 合并图层并保存图片 ====
-        function downloadPoster() {
-            // 创建一个临时画布用于合并
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = bgCanvas.width;
-            tempCanvas.height = bgCanvas.height;
-            const tCtx = tempCanvas.getContext('2d');
-
-            // 依次画入底层和涂鸦层
-            tCtx.drawImage(bgCanvas, 0, 0);
-            tCtx.drawImage(drawCanvas, 0, 0);
-
-            // 导出并下载
-            const dataURL = tempCanvas.toDataURL('image/jpeg', 0.9);
-            const link = document.createElement('a');
-            link.download = `WANTED_Poster_${new Date().getTime()}.jpg`;
-            link.href = dataURL;
-            link.click();
-        }
-    </script>
+    function download() {
+        const final = document.createElement('canvas');
+        final.width = bgCanvas.width; final.height = bgCanvas.height;
+        const ctx = final.getContext('2d');
+        ctx.drawImage(bgCanvas, 0, 0);
+        ctx.drawImage(drawCanvas, 0, 0);
+        const a = document.createElement('a');
+        a.href = final.toDataURL();
+        a.download = 'wanted.jpg';
+        a.click();
+    }
+</script>
 </body>
 </html>
