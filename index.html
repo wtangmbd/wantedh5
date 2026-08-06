@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WANTED · 罪名通缉令生成器</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background-color: #1a1a1a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            color: #d4d4d4;
+        }
+
+        /* 顶部画布区域 */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px; /* 限制最大宽度，适配PC与移动端 */
+            background: #000;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            touch-action: none; /* 阻止移动端默认的滑动屏幕行为，方便画图 */
+            cursor: crosshair;
+        }
+
+        /* 悬浮提示语 */
+        .hint {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            pointer-events: none;
+            letter-spacing: 1px;
+            animation: fadeOut 3s forwards;
+            animation-delay: 2s;
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; visibility: hidden; }
+        }
+
+        /* 底部控制面板 */
+        .control-panel {
+            width: 100%;
+            max-width: 500px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-top: 2px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex-grow: 1;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        label {
+            font-size: 13px;
+            color: #999;
+        }
+        input, textarea {
+            width: 100%;
+            background: #1e1e1e;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 15px;
+            outline: none;
+            font-family: inherit;
+        }
+        input:focus, textarea:focus {
+            border-color: #8b3a30;
+        }
+        textarea {
+            resize: none;
+            height: 80px;
+        }
+        
+        .btn-generate {
+            background: #8b3a30;
+            color: #fff;
+            border: none;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 5px;
+        }
+        .btn-generate:active {
+            background: #6a2a22;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="canvas-container">
+        <canvas id="posterCanvas"></canvas>
+        <div class="hint">直接在雷达图上滑动或点击调整</div>
+    </div>
+
+    <div class="control-panel">
+        <div class="input-group">
+            <label>被通缉者姓名</label>
+            <input type="text" id="inputName" placeholder="输入姓名，例如：跷跷板糕手" maxlength="10">
+        </div>
+        
+        <div class="input-group">
+            <label>罪行备注（支持换行）</label>
+            <textarea id="inputNote" placeholder="输入备注，例如：爱得热烈偏执易深陷" maxlength="30"></textarea>
+        </div>
+
+        <button class="btn-generate" onclick="downloadPoster()">保存通缉令图片</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('posterCanvas');
+        const ctx = canvas.getContext('2d');
+        const inputName = document.getElementById('inputName');
+        const inputNote = document.getElementById('inputNote');
+
+        // ==== 配置参数 (可根据实际底图微调比例) ====
+        const CONFIG = {
+            bgSrc: '7853b6a44ae0169c8597e955aed39a1.jpg', // 背景原图
+            
+            // 雷达图中心点位置与最大半径 (基于图片宽度的百分比)
+            radarCenterX: 0.515, 
+            radarCenterY: 0.528, 
+            radarMaxRadius: 0.29, 
+            
+            // 文本坐标 (基于图片宽高百分比)
+            titleX: 0.655, titleY: 0.29,  // XX罪
+            nameX: 0.21,  nameY: 0.825, // 姓名
+            noteX: 0.21,  noteY: 0.865, // 备注
+            
+            // 文本样式
+            fontFamily: '"Kaiti", "楷体", "STKaiti", cursive',
+            textColor: '#4a1f16',
+            radarFillColor: 'rgba(119, 44, 34, 0.7)',
+            radarStrokeColor: 'rgba(70, 20, 15, 0.8)'
+        };
+
+        // 7个维度 (顺时针方向，从正上方开始)
+        const dimensions = ['沉溺', '懒惰', '偏执', '寡言', '多情', '嫉妒', '色欲'];
+        // 初始化各个维度的值 (0-5档)
+        let values = [3, 2, 4, 2, 3, 3, 2]; 
+
+        const bgImage = new Image();
+        bgImage.src = CONFIG.bgSrc;
+        
+        bgImage.onload = () => {
+            // 设置画布尺寸与原图一致，保证高清
+            canvas.width = bgImage.naturalWidth;
+            canvas.height = bgImage.naturalHeight;
+            drawPoster();
+        };
+
+        // 监听输入框，实时重新绘制
+        inputName.addEventListener('input', drawPoster);
+        inputNote.addEventListener('input', drawPoster);
+
+        // ==== 核心绘制逻辑 ====
+        function drawPoster() {
+            if (!bgImage.complete) return;
+
+            // 1. 绘制底图
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+            const cx = canvas.width * CONFIG.radarCenterX;
+            const cy = canvas.height * CONFIG.radarCenterY;
+            const maxR = canvas.width * CONFIG.radarMaxRadius;
+
+            // 2. 绘制雷达多边形
+            ctx.beginPath();
+            for (let i = 0; i < 7; i++) {
+                // 正上方为 -90度 (-Math.PI / 2)
+                const angle = -Math.PI / 2 + (i * 2 * Math.PI / 7);
+                // 根据值计算当前点半径 (满分5档)
+                const r = maxR * (values[i] / 5);
+                const x = cx + r * Math.cos(angle);
+                const y = cy + r * Math.sin(angle);
+                
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            
+            ctx.fillStyle = CONFIG.radarFillColor;
+            ctx.fill();
+            ctx.lineWidth = canvas.width * 0.005;
+            ctx.strokeStyle = CONFIG.radarStrokeColor;
+            ctx.stroke();
+
+            // 3. 计算最高维度，绘制“XX罪”
+            let maxIndex = 0;
+            let maxVal = values[0];
+            for (let i = 1; i < 7; i++) {
+                if (values[i] > maxVal) {
+                    maxVal = values[i];
+                    maxIndex = i;
+                }
+            }
+            const topCrime = dimensions[maxIndex] + '罪';
+            
+            ctx.fillStyle = CONFIG.textColor;
+            
+            // 绘制标题
+            ctx.font = `bold ${canvas.width * 0.08}px ${CONFIG.fontFamily}`;
+            // 稍微倾斜一点点让排版更自然
+            ctx.save();
+            ctx.translate(canvas.width * CONFIG.titleX, canvas.height * CONFIG.titleY);
+            ctx.rotate(-2 * Math.PI / 180);
+            ctx.fillText(topCrime, 0, 0);
+            ctx.restore();
+
+            // 4. 绘制姓名
+            ctx.font = `bold ${canvas.width * 0.045}px ${CONFIG.fontFamily}`;
+            const nameStr = inputName.value || '';
+            ctx.fillText(nameStr, canvas.width * CONFIG.nameX, canvas.height * CONFIG.nameY);
+
+            // 5. 绘制备注 (支持多行)
+            ctx.font = `bold ${canvas.width * 0.038}px ${CONFIG.fontFamily}`;
+            const noteLines = inputNote.value.split('\n');
+            const lineHeight = canvas.height * 0.035;
+            noteLines.forEach((line, index) => {
+                ctx.fillText(line, canvas.width * CONFIG.noteX, canvas.height * CONFIG.noteY + (index * lineHeight));
+            });
+        }
+
+
+        // ==== 画布交互逻辑 (滑动/点击修改雷达图) ====
+        let isDragging = false;
+
+        function handlePointerEvent(e) {
+            e.preventDefault(); // 阻止滚动
+            
+            // 获取点击位置相对于画布内部坐标的换算
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            // 处理触屏或鼠标
+            let clientX = e.clientX;
+            let clientY = e.clientY;
+            if(e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+
+            const x = (clientX - rect.left) * scaleX;
+            const y = (clientY - rect.top) * scaleY;
+
+            const cx = canvas.width * CONFIG.radarCenterX;
+            const cy = canvas.height * CONFIG.radarCenterY;
+            const maxR = canvas.width * CONFIG.radarMaxRadius;
+
+            // 计算角度和距离
+            const dx = x - cx;
+            const dy = y - cy;
+            let angle = Math.atan2(dy, dx) + Math.PI / 2; // 将坐标系旋转，使上方为0
+            if (angle < 0) angle += Math.PI * 2;
+
+            // 判断离哪个轴最近 (360度/7)
+            const segment = (Math.PI * 2) / 7;
+            const axisIndex = Math.round(angle / segment) % 7;
+
+            // 根据距离计算数值档位 (0-5)
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            let val = Math.round((distance / maxR) * 5);
+            val = Math.max(0, Math.min(5, val)); // 限制在 0-5 之间
+
+            values[axisIndex] = val;
+            drawPoster();
+        }
+
+        // 绑定鼠标/触控事件
+        canvas.addEventListener('mousedown', (e) => { isDragging = true; handlePointerEvent(e); });
+        canvas.addEventListener('mousemove', (e) => { if(isDragging) handlePointerEvent(e); });
+        window.addEventListener('mouseup', () => { isDragging = false; });
+
+        canvas.addEventListener('touchstart', (e) => { isDragging = true; handlePointerEvent(e); }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => { if(isDragging) handlePointerEvent(e); }, {passive: false});
+        window.addEventListener('touchend', () => { isDragging = false; });
+
+
+        // ==== 保存图片 ====
+        function downloadPoster() {
+            if(!inputName.value) {
+                alert("请填写一下姓名哦！");
+                return;
+            }
+            const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+            const link = document.createElement('a');
+            link.download = `WANTED_${inputName.value}.jpg`;
+            link.href = dataURL;
+            link.click();
+        }
+    </script>
+</body>
+</html>
